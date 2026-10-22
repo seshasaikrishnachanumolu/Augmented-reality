@@ -8,7 +8,8 @@
     "signaling": "tsx watch server/signaling-server.ts",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.19",
