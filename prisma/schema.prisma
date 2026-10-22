@@ -1,0 +1,55 @@
+// Prisma schema for Mesha Studio's backend: user accounts and their
+// per-user CoSpace projects (replacing the old localStorage-only storage).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  name           String
+  createdAt      DateTime     @default(now())
+  projects       Project[]
+  callsPlaced    CallInvite[] @relation("CallsPlaced")
+  callsReceived  CallInvite[] @relation("CallsReceived")
+}
+
+model Project {
+  id         String   @id @default(cuid())
+  name       String
+  color      String
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scenesJson String   @default("[]")
+  activeSceneId String @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// A record of an AR call placed from one account to another by account ID.
+// The signaling server (WebSocket) owns the live in-memory call state
+// (ringing/connected handshake, SDP/ICE relay); this table is just a
+// persisted history/audit trail of calls so they survive server restarts
+// and can be shown in a "recent calls" list later.
+model CallInvite {
+  id         String    @id @default(cuid())
+  callerId   String
+  callee     String
+  caller     User      @relation("CallsPlaced", fields: [callerId], references: [id], onDelete: Cascade)
+  calleeUser User      @relation("CallsReceived", fields: [callee], references: [id], onDelete: Cascade)
+  status     String    @default("ringing") // ringing | accepted | declined | ended | missed
+  createdAt  DateTime  @default(now())
+  endedAt    DateTime?
+
+  @@index([callerId])
+  @@index([callee])
+}
