@@ -5,7 +5,7 @@ import Script from "next/script";
 import { WebXRHitTestViewer } from "./WebXRHitTestViewer";
 import { ARCallSession } from "./ARCallSession";
 import { RemotePersonOverlay } from "./RemotePersonOverlay";
-import { useAuthStore } from "@/lib/store/authStore";
+import { useClerkAuthUser } from "@/lib/store/useClerkAuthUser";
 
 type LoadState = "loading" | "ready" | "script-error";
 type MotionPermission = "unknown" | "not-required" | "needed" | "granted" | "denied";
@@ -19,7 +19,7 @@ const MODEL_SRC = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
 const POSTER_SRC = "https://modelviewer.dev/shared-assets/models/Astronaut.webp";
 
 export function ARViewer({ sceneId }: ARViewerProps) {
-  const user = useAuthStore((s) => s.user);
+  const { user } = useClerkAuthUser();
   const [viewMode, setViewMode] = useState<ViewMode>("quick");
   const [isSecureContext] = useState<boolean | null>(() =>
     typeof window !== "undefined" ? window.isSecureContext : true

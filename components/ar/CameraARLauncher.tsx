@@ -6,7 +6,7 @@ import Script from "next/script";
 import { WebXRHitTestViewer } from "./WebXRHitTestViewer";
 import { ARCallSession } from "./ARCallSession";
 import { RemotePersonOverlay } from "./RemotePersonOverlay";
-import { useAuthStore } from "@/lib/store/authStore";
+import { useClerkAuthUser } from "@/lib/store/useClerkAuthUser";
 
 type PermissionState = "checking" | "granted" | "denied" | "unsupported" | "insecure";
 type XrSupport = "checking" | "supported" | "unsupported";
@@ -51,7 +51,7 @@ async function checkWebXrSupport(): Promise<boolean> {
 
 export function CameraARLauncher() {
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
+  const { user } = useClerkAuthUser();
   const [permission, setPermission] = useState<PermissionState>("checking");
   const [arActive, setArActive] = useState(false);
   const [xrSupport, setXrSupport] = useState<XrSupport>("checking");

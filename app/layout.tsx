@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { SessionCheck } from "@/components/auth/SessionCheck";
+import { ClerkProvider } from "@clerk/nextjs";
 import { ServiceWorkerCleaner } from "@/components/layout/ServiceWorkerCleaner";
 import "./globals.css";
 
@@ -26,9 +26,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex h-full flex-col">
-        <SessionCheck />
-        <ServiceWorkerCleaner />
-        {children}
+        <ClerkProvider>
+          <ServiceWorkerCleaner />
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );

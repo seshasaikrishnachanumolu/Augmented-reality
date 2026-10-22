@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Logo } from "@/components/layout/Logo";
 import { useProjectsStore } from "@/lib/store/projectsStore";
-import { useAuthStore } from "@/lib/store/authStore";
+import { useClerkAuthUser } from "@/lib/store/useClerkAuthUser";
 import { PROJECT_TEMPLATES } from "@/lib/templates";
 import { ProjectCard } from "./ProjectCard";
 import { CreateProjectCard } from "./CreateProjectCard";
@@ -16,7 +16,7 @@ export function GalleryPage() {
   const projects = useProjectsStore((s) => s.projects);
   const hydrated = useProjectsStore((s) => s.hasHydrated);
   const fetchProjects = useProjectsStore((s) => s.fetchProjects);
-  const user = useAuthStore((s) => s.user);
+  const { user } = useClerkAuthUser();
 
   useEffect(() => {
     fetchProjects();

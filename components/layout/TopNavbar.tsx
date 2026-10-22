@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { useProjectsStore } from "@/lib/store/projectsStore";
-import { useAuthStore } from "@/lib/store/authStore";
+import { useClerkAuthUser } from "@/lib/store/useClerkAuthUser";
 import { Button } from "@/components/ui/Button";
 import { UserMenu } from "@/components/gallery/UserMenu";
 import type { EditorMode } from "@/types/scene";
@@ -24,7 +24,7 @@ export function TopNavbar() {
   const projectId = useEditorStore((s) => s.projectId);
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === projectId));
   const renameProject = useProjectsStore((s) => s.renameProject);
-  const user = useAuthStore((s) => s.user);
+  const { user } = useClerkAuthUser();
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
 

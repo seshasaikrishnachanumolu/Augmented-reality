@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/server/auth";
+import { getClerkSession } from "@/lib/server/clerkSession";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await getClerkSession();
   if (!session) {
     return NextResponse.json({ user: null }, { status: 200 });
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { getSession } from "@/lib/server/auth";
+import { getClerkSession as getSession } from "@/lib/server/clerkSession";
 import type { SceneData } from "@/types/scene";
 
 interface RouteParams {

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAuthStore, type AuthUser } from "@/lib/store/authStore";
+import { useClerk } from "@clerk/nextjs";
+import type { AuthUser } from "@/lib/store/authStore";
 
 interface UserMenuProps {
   user: AuthUser;
@@ -11,13 +12,13 @@ interface UserMenuProps {
 
 export function UserMenu({ user }: UserMenuProps) {
   const router = useRouter();
-  const logout = useAuthStore((s) => s.logout);
+  const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
 
   const initial = user.name.trim().charAt(0).toUpperCase() || "?";
 
   const handleLogout = async () => {
-    await logout();
+    await signOut();
     router.push("/login");
   };
 
