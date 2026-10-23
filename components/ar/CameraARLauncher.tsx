@@ -124,6 +124,17 @@ export function CameraARLauncher() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keeps whichever <video> element is currently mounted (pre-AR preview
+  // or the in-call camera background) attached to the live stream — the
+  // element itself gets unmounted/remounted as the user switches between
+  // branches below, so srcObject needs to be re-applied each time rather
+  // than set once.
+  useEffect(() => {
+    if (videoRef.current && localStream) {
+      videoRef.current.srcObject = localStream;
+    }
+  }, [localStream, arActive, xrSupport, remotePerson.active]);
+
   const handleClose = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     router.push("/gallery");
@@ -151,54 +162,76 @@ export function CameraARLauncher() {
   }
 
   if (arActive && xrSupport === "unsupported") {
+    // During an active call, show the live camera feed as the background
+    // instead of the 3D astronaut placeholder — the point of a call is
+    // seeing the other person composited into *your own* surroundings,
+    // not floating over an unrelated 3D model. The astronaut/model-viewer
+    // placement demo still applies when there's no call in progress.
+    const isCalling = remotePerson.active;
+
     return (
-      <div className="relative h-screen w-screen bg-surface-900">
-        <Script
-          type="module"
-          src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"
-          strategy="afterInteractive"
-          onLoad={() => customElements.whenDefined("model-viewer").then(() => setViewerLoaded(true))}
-        />
+      <div className="relative h-screen w-screen bg-black">
+        {isCalling ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <>
+            <Script
+              type="module"
+              src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"
+              strategy="afterInteractive"
+              onLoad={() => customElements.whenDefined("model-viewer").then(() => setViewerLoaded(true))}
+            />
+
+            {!viewerLoaded ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-white">
+                <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white" />
+                <p className="text-sm text-white/70">Loading 3D viewer…</p>
+              </div>
+            ) : (
+              // @ts-expect-error -- model-viewer is a web component with no bundled React types
+              <model-viewer
+                src={MODEL_SRC}
+                poster={POSTER_SRC}
+                alt="3D preview of your Mesha Studio scene"
+                ar
+                ar-modes="webxr scene-viewer quick-look"
+                camera-controls
+                shadow-intensity="1"
+                auto-rotate
+                style={{ width: "100%", height: "100%", backgroundColor: "#171327" }}
+              />
+            )}
+          </>
+        )}
 
         <button
           onClick={() => setArActive(false)}
           className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur"
-          aria-label="Close 3D viewer"
+          aria-label="Close viewer"
         >
           ✕
         </button>
 
-        {!viewerLoaded ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-white">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white" />
-            <p className="text-sm text-white/70">Loading 3D viewer…</p>
+        {!isCalling && (
+          <div className="absolute inset-x-0 bottom-0 z-[5] flex flex-col items-center gap-1 bg-gradient-to-t from-black/80 to-transparent p-6 pb-10 text-center text-white">
+            <p className="text-xs text-white/70">
+              Surface detection via your camera isn&apos;t available in this browser, so here&apos;s a 3D
+              view instead. Drag to rotate, pinch or scroll to zoom.
+            </p>
           </div>
-        ) : (
-          // @ts-expect-error -- model-viewer is a web component with no bundled React types
-          <model-viewer
-            src={MODEL_SRC}
-            poster={POSTER_SRC}
-            alt="3D preview of your Mesha Studio scene"
-            ar
-            ar-modes="webxr scene-viewer quick-look"
-            camera-controls
-            shadow-intensity="1"
-            auto-rotate
-            style={{ width: "100%", height: "100%", backgroundColor: "#171327" }}
-          />
         )}
-
-        <div className="absolute inset-x-0 bottom-0 z-[5] flex flex-col items-center gap-1 bg-gradient-to-t from-black/80 to-transparent p-6 pb-10 text-center text-white">
-          <p className="text-xs text-white/70">
-            Surface detection via your camera isn&apos;t available in this browser, so here&apos;s a 3D
-            view instead. Drag to rotate, pinch or scroll to zoom.
-          </p>
-        </div>
 
         {/* The call feature doesn't need WebXR surface detection, so it's
             available here too — the remote person renders as a floating
-            cutout overlay on top of the 3D viewer via plain 2D canvas,
-            since model-viewer has no Three.js scene of ours to plug into. */}
+            cutout overlay on top of your own camera feed via plain 2D
+            canvas, since model-viewer has no Three.js scene of ours to
+            plug into. */}
         {user && (
           <>
             <RemotePersonOverlay canvasRef={remotePerson.canvasRef} active={remotePerson.active} />
@@ -266,17 +299,19 @@ export function CameraARLauncher() {
             ✕
           </button>
 
-          <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 to-transparent p-6 pb-10">
-            <p className="text-center text-sm text-white/90">
-              Point your camera at a surface, then start AR to detect it and place a 3D model.
-            </p>
-            <button
-              onClick={() => setArActive(true)}
-              className="rounded-full bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-soft-lg"
-            >
-              🎯 Start Surface AR
-            </button>
-          </div>
+          {!remotePerson.active && (
+            <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 to-transparent p-6 pb-10">
+              <p className="text-center text-sm text-white/90">
+                Point your camera at a surface, then start AR to detect it and place a 3D model.
+              </p>
+              <button
+                onClick={() => setArActive(true)}
+                className="rounded-full bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-soft-lg"
+              >
+                🎯 Start Surface AR
+              </button>
+            </div>
+          )}
 
           {/* Calling works straight from this plain camera preview too —
               no need to enter surface-AR mode first. */}

@@ -76,6 +76,16 @@ export function ARViewer({ sceneId }: ARViewerProps) {
   const [arSupportChecked, setArSupportChecked] = useState(false);
   const [modelError, setModelError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Keeps the in-call camera background <video> attached to the live
+  // stream — it mounts/unmounts as remotePerson.active toggles, so
+  // srcObject needs to be re-applied each time rather than set once.
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, remotePerson.active]);
 
   useEffect(() => {
     if (isSecureContext === false) return;
@@ -151,6 +161,8 @@ export function ARViewer({ sceneId }: ARViewerProps) {
     );
   }
 
+  const isCalling = remotePerson.active;
+
   return (
     <div ref={containerRef} className="relative h-screen w-screen bg-surface-900">
       <Script
@@ -160,14 +172,28 @@ export function ARViewer({ sceneId }: ARViewerProps) {
         onError={() => setLoadState("script-error")}
       />
 
-      {loadState === "loading" && (
+      {/* During an active call, show the live camera feed as the
+          background instead of the 3D astronaut placeholder — the point
+          of a call is seeing the other person composited into *your own*
+          surroundings. */}
+      {isCalling && (
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+
+      {loadState === "loading" && !isCalling && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-surface-900 text-white">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white" />
           <p className="text-sm text-white/70">Loading AR scene…</p>
         </div>
       )}
 
-      {loadState === "ready" && motionPermission === "needed" && (
+      {loadState === "ready" && !isCalling && motionPermission === "needed" && (
         <div className="absolute inset-x-0 top-0 z-10 flex justify-center p-4">
           <button
             onClick={requestMotionPermission}
@@ -178,14 +204,14 @@ export function ARViewer({ sceneId }: ARViewerProps) {
         </div>
       )}
 
-      {loadState === "ready" && motionPermission === "denied" && (
+      {loadState === "ready" && !isCalling && motionPermission === "denied" && (
         <div className="absolute inset-x-4 top-4 z-10 rounded-2xl bg-amber-100 px-4 py-3 text-xs text-amber-900 shadow-soft">
           Motion access was denied. Camera-based AR tracking may not work correctly — you can still view
           the 3D model with touch controls.
         </div>
       )}
 
-      {loadState === "ready" && (
+      {loadState === "ready" && !isCalling && (
         // @ts-expect-error -- model-viewer is a web component with no bundled React types
         <model-viewer
           src={MODEL_SRC}
@@ -201,21 +227,21 @@ export function ARViewer({ sceneId }: ARViewerProps) {
         />
       )}
 
-      {loadState === "ready" && modelError && (
+      {loadState === "ready" && !isCalling && modelError && (
         <div className="absolute inset-x-4 bottom-4 z-10 rounded-2xl bg-coral-500/90 px-4 py-3 text-xs text-white shadow-soft">
           This model couldn&apos;t be loaded. AR viewing is unavailable for scene{" "}
           <span className="font-mono">{sceneId}</span> right now.
         </div>
       )}
 
-      {loadState === "ready" && arSupportChecked && (
+      {loadState === "ready" && !isCalling && arSupportChecked && (
         <div className="absolute bottom-20 left-1/2 z-10 w-[92%] max-w-sm -translate-x-1/2 rounded-2xl bg-black/40 px-4 py-2 text-center text-[11px] text-white/80 backdrop-blur">
           Tap the AR icon to view in your space. If AR isn&apos;t available on this device, you can still
           rotate and pinch to explore the 3D model.
         </div>
       )}
 
-      {loadState === "ready" && (
+      {loadState === "ready" && !isCalling && (
         <button
           onClick={() => setViewMode("surface")}
           className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-brand-500 px-5 py-2.5 text-xs font-semibold text-white shadow-soft-lg"
