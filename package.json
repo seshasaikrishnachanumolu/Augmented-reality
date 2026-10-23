@@ -6,6 +6,7 @@
     "dev": "concurrently -n next,signal -c blue,magenta \"next dev\" \"npm:signaling\"",
     "dev:next": "next dev",
     "signaling": "tsx watch server/signaling-server.ts",
+    "signaling:start": "tsx server/signaling-server.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -28,6 +29,7 @@
     "react-dom": "19.2.8",
     "three": "^0.186.0",
     "three-stdlib": "^2.36.1",
+    "tsx": "^4.19.2",
     "ws": "^8.18.0",
     "zustand": "^5.0.15"
   },
@@ -43,7 +45,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

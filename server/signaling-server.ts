@@ -26,7 +26,10 @@ import type {
 // call flow, so failures are swallowed rather than blocking signaling.
 const prisma = new PrismaClient();
 
-const PORT = Number(process.env.SIGNALING_PORT ?? 4001);
+// Hosting platforms like Render/Railway assign a port dynamically via
+// `PORT` and require the app to bind to it — SIGNALING_PORT remains as a
+// fallback for local development where it's set explicitly.
+const PORT = Number(process.env.PORT ?? process.env.SIGNALING_PORT ?? 4001);
 
 interface ConnectedClient {
   socket: WebSocket;
