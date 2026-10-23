@@ -33,6 +33,7 @@ interface ARCallSessionProps {
  */
 export function ARCallSession({ myAccountId, myName, localStream, onRemotePersonChange }: ARCallSessionProps) {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // useCallSignaling and useWebRtcCall each need a stable callback into the
   // other, but neither can be constructed before the other exists. Break
@@ -91,6 +92,16 @@ export function ARCallSession({ myAccountId, myName, localStream, onRemotePerson
     video.srcObject = webRtc.remoteStream;
   }, [webRtc.remoteStream]);
 
+  // The hidden <video> above is muted on purpose (it only exists to feed
+  // frames into the background-segmentation canvas) — actual audio
+  // playback happens here, through a separate audio-only element, so the
+  // other person's voice is actually heard.
+  useEffect(() => {
+    const audio = remoteAudioRef.current;
+    if (!audio) return;
+    audio.srcObject = webRtc.remoteStream;
+  }, [webRtc.remoteStream]);
+
   const isCallConnected = signaling.phase === "connected";
   const { canvasRef: remotePersonCanvasRef } = useSelfieSegmentation({
     videoRef: remoteVideoRef,
@@ -115,8 +126,15 @@ export function ARCallSession({ myAccountId, myName, localStream, onRemotePerson
     <>
       {/* Hidden element feeding the remote WebRTC stream into the
           segmentation pipeline; nothing here is shown directly since the
-          composited result is what gets rendered into the AR scene. */}
+          composited result is what gets rendered into the AR scene. This
+          one stays muted so its audio doesn't play — the dedicated
+          <audio> element below handles that instead. */}
       <video ref={remoteVideoRef} autoPlay playsInline muted className="hidden" />
+
+      {/* Plays the other person's voice. Browsers require a user gesture
+          before unmuted audio can autoplay — accepting/placing the call is
+          that gesture, so this reliably starts playing once connected. */}
+      <audio ref={remoteAudioRef} autoPlay className="hidden" />
 
       {signaling.phase === "idle" && (
         <CallInviteBar
