@@ -6,15 +6,13 @@ import Script from "next/script";
 import { WebXRHitTestViewer } from "./WebXRHitTestViewer";
 import { ARCallSession } from "./ARCallSession";
 import { RemotePersonOverlay } from "./RemotePersonOverlay";
+import { ModelPicker, PLACEABLE_ASSETS, type PlaceableAsset } from "./ModelPicker";
 import { useClerkAuthUser } from "@/lib/store/useClerkAuthUser";
 
 type PermissionState = "checking" | "granted" | "denied" | "unsupported" | "insecure";
 type XrSupport = "checking" | "supported" | "unsupported";
 /** Which of the two Camera AR experiences the user has picked, if any. */
-type LauncherMode = "choose" | "model" | "call";
-
-const MODEL_SRC = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
-const POSTER_SRC = "https://modelviewer.dev/shared-assets/models/Astronaut.webp";
+type LauncherMode = "choose" | "pickModel" | "model" | "call";
 
 /**
  * Standalone camera-based AR entry point, launched directly from the
@@ -22,8 +20,10 @@ const POSTER_SRC = "https://modelviewer.dev/shared-assets/models/Astronaut.webp"
  * via getUserMedia for a live preview/permission gate, then presents two
  * distinct experiences to choose from:
  *
- *  - "model": place a 3D model in your space via WebXR hit-test (Android
- *    Chrome) or a `<model-viewer>` 3D fallback elsewhere.
+ *  - "model": pick which model to place (ModelPicker), then place it in
+ *    your space via WebXR hit-test (Android Chrome) or a `<model-viewer>`
+ *    3D fallback elsewhere — tapping/clicking places the chosen model on
+ *    the detected surface.
  *  - "call": ring another account by ID and see them composited live into
  *    your own camera feed once they accept.
  *
@@ -52,6 +52,7 @@ export function CameraARLauncher() {
   const { user } = useClerkAuthUser();
   const [permission, setPermission] = useState<PermissionState>("checking");
   const [mode, setMode] = useState<LauncherMode>("choose");
+  const [selectedAsset, setSelectedAsset] = useState<PlaceableAsset>(PLACEABLE_ASSETS[0]);
   const [xrSupport, setXrSupport] = useState<XrSupport>("checking");
   const [viewerLoaded, setViewerLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -138,9 +139,24 @@ export function CameraARLauncher() {
     router.push("/gallery");
   };
 
-  // ---- Mode: place a 3D model via AR (WebXR hit-test or 3D fallback) ----
+  // ---- Mode: pick which model to place ----
+  if (mode === "pickModel") {
+    return (
+      <ModelPicker
+        onSelect={(asset) => {
+          setSelectedAsset(asset);
+          setMode("model");
+        }}
+        onClose={() => setMode("choose")}
+      />
+    );
+  }
+
+  // ---- Mode: place the chosen model via AR (WebXR hit-test or 3D fallback) ----
   if (mode === "model" && xrSupport === "supported") {
-    return <WebXRHitTestViewer modelSrc={MODEL_SRC} onExit={() => setMode("choose")} />;
+    return (
+      <WebXRHitTestViewer modelSrc={selectedAsset.source.url} onExit={() => setMode("pickModel")} />
+    );
   }
 
   if (mode === "model" && xrSupport === "unsupported") {
@@ -154,9 +170,9 @@ export function CameraARLauncher() {
         />
 
         <button
-          onClick={() => setMode("choose")}
+          onClick={() => setMode("pickModel")}
           className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur"
-          aria-label="Close 3D viewer"
+          aria-label="Choose a different model"
         >
           ✕
         </button>
@@ -169,9 +185,9 @@ export function CameraARLauncher() {
         ) : (
           // @ts-expect-error -- model-viewer is a web component with no bundled React types
           <model-viewer
-            src={MODEL_SRC}
-            poster={POSTER_SRC}
-            alt="3D preview of your Mesha Studio scene"
+            key={selectedAsset.modelType}
+            src={selectedAsset.source.url}
+            alt={selectedAsset.description}
             ar
             ar-modes="webxr scene-viewer quick-look"
             camera-controls
@@ -284,7 +300,7 @@ export function CameraARLauncher() {
 
             <div className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
               <button
-                onClick={() => setMode("model")}
+                onClick={() => setMode("pickModel")}
                 className="flex flex-1 flex-col items-center gap-1 rounded-2xl bg-brand-500 px-5 py-4 text-center shadow-soft-lg transition-transform hover:scale-[1.02]"
               >
                 <span className="text-2xl">🦣</span>
