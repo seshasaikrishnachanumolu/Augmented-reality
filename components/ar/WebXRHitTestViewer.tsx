@@ -196,21 +196,48 @@ export function WebXRHitTestViewer({
       let hitTestSource: XRHitTestSource | null = null;
       let hitTestSourceRequested = false;
 
-      // "depth-sensing" is optional (most devices don't support it) — when
-      // it's granted with gpu-optimized usage, real objects like a hand
-      // can correctly occlude the placed model instead of it always
-      // rendering on top of the whole camera feed. See lib/ar/depthOcclusion.
-      const session = await xr.requestSession("immersive-ar", {
-        requiredFeatures: ["hit-test"],
-        optionalFeatures: ["dom-overlay", "depth-sensing"],
-        depthSensing: {
-          usagePreference: ["gpu-optimized"],
-          dataFormatPreference: ["luminance-alpha"],
-        },
-        domOverlay: canvas.parentElement ? { root: canvas.parentElement } : undefined,
-      } as XRSessionInit);
+      const buildSessionInit = (includeDepthSensing: boolean): XRSessionInit => {
+        const init: Record<string, unknown> = {
+          requiredFeatures: ["hit-test"],
+          optionalFeatures: includeDepthSensing ? ["dom-overlay", "depth-sensing"] : ["dom-overlay"],
+          domOverlay: canvas.parentElement ? { root: canvas.parentElement } : undefined,
+        };
+        if (includeDepthSensing) {
+          // "depth-sensing" is optional (most devices don't support it) —
+          // when granted with gpu-optimized usage, real objects like a
+          // hand can correctly occlude the placed model instead of it
+          // always rendering on top of the whole camera feed. See
+          // lib/ar/depthOcclusion.
+          init.depthSensing = {
+            usagePreference: ["gpu-optimized"],
+            dataFormatPreference: ["luminance-alpha"],
+          };
+        }
+        return init as XRSessionInit;
+      };
+
+      // Requesting "depth-sensing" is supposed to be safely ignorable when
+      // unsupported (it's in optionalFeatures, not requiredFeatures), but
+      // some real Android/Chrome builds have been observed to destabilize
+      // the entire session — failing reference-space negotiation outright
+      // — when depth-sensing is requested but not actually available on
+      // that device. Core AR placement must never be put at risk by the
+      // experimental occlusion feature, so this tries with depth-sensing
+      // first and falls back to the plain, known-working session on any
+      // failure at all.
+      let session: XRSession | undefined;
+      try {
+        session = await xr.requestSession("immersive-ar", buildSessionInit(true));
+        await renderer.xr.setSession(session);
+      } catch {
+        await session?.end().catch(() => {});
+        session = await xr.requestSession("immersive-ar", buildSessionInit(false));
+        await renderer.xr.setSession(session);
+      }
+      if (!session) {
+        throw new Error("Couldn't start the AR session.");
+      }
       sessionRef.current = session;
-      await renderer.xr.setSession(session);
       setState("active");
 
       // Set up once the session is active — depthUsage is only populated
