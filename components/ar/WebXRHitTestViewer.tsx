@@ -318,7 +318,9 @@ export function WebXRHitTestViewer({
       // every call site below treats that as "skip occlusion".
       const gl = renderer.getContext();
       const depthSetup =
-        gl instanceof WebGL2RenderingContext ? setupDepthOcclusion(session, gl) : null;
+        attemptDepthSensingRef.current && gl instanceof WebGL2RenderingContext
+          ? setupDepthOcclusion(session, gl)
+          : null;
       setDepthOcclusionActive(depthSetup !== null);
 
       session.addEventListener("end", () => {

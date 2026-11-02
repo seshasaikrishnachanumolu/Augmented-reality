@@ -45,10 +45,19 @@ export function setupDepthOcclusion(session: XRSession, gl: WebGLRenderingContex
   depthTexture: THREE.ExternalTexture;
 } | null {
   if (typeof XRWebGLBinding === "undefined") return null;
-  // Only the GPU-optimized usage mode is wired up here — it's the mode
-  // meant for full-screen occlusion shaders. CPU-optimized depth exists
-  // for point-sampling use cases (hit-testing, physics), not this.
-  if (session.depthUsage !== "gpu-optimized") return null;
+
+  try {
+    // Reading `.depthUsage` throws (not just "undefined") on sessions
+    // that never requested the "depth-sensing" feature at all — this
+    // must be guarded, not just checked with !==, or every session
+    // without depth-sensing crashes here.
+    // Only the GPU-optimized usage mode is wired up here — it's the mode
+    // meant for full-screen occlusion shaders. CPU-optimized depth exists
+    // for point-sampling use cases (hit-testing, physics), not this.
+    if (session.depthUsage !== "gpu-optimized") return null;
+  } catch {
+    return null;
+  }
 
   try {
     const binding = new XRWebGLBinding(session, gl);
