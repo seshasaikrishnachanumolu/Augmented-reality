@@ -47,6 +47,13 @@ async function checkWebXrSupport(): Promise<boolean> {
   }
 }
 
+/** The subset of the `<model-viewer>` custom element's API this component drives imperatively. */
+interface ModelViewerElement extends HTMLElement {
+  availableAnimations?: string[];
+  animationName?: string;
+  play?: (options?: { repetitions?: number }) => void;
+}
+
 export function CameraARLauncher() {
   const router = useRouter();
   const { user } = useClerkAuthUser();
@@ -55,6 +62,11 @@ export function CameraARLauncher() {
   const [selectedAsset, setSelectedAsset] = useState<PlaceableAsset>(PLACEABLE_ASSETS[0]);
   const [xrSupport, setXrSupport] = useState<XrSupport>("checking");
   const [viewerLoaded, setViewerLoaded] = useState(false);
+  // Animation state for the <model-viewer> fallback path — the "Interact"
+  // button cycles through whichever baked clips the current model has.
+  const [modelViewerAnimations, setModelViewerAnimations] = useState<string[]>([]);
+  const [activeAnimationIndex, setActiveAnimationIndex] = useState(0);
+  const modelViewerElRef = useRef<ModelViewerElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -139,6 +151,38 @@ export function CameraARLauncher() {
     router.push("/gallery");
   };
 
+  // Called whenever the <model-viewer> DOM node is created or discarded
+  // (it remounts on every model change since it's keyed by modelType) — a
+  // callback ref, rather than a plain ref, is what lets us re-attach the
+  // "load" listener each time a fresh element shows up.
+  const attachModelViewer = useCallback((el: ModelViewerElement | null) => {
+    modelViewerElRef.current = el;
+    setModelViewerAnimations([]);
+    setActiveAnimationIndex(0);
+    if (!el) return;
+
+    const handleLoad = () => {
+      const names = el.availableAnimations ?? [];
+      setModelViewerAnimations(names);
+      if (names.length > 0) {
+        el.animationName = names[0];
+        el.play?.({ repetitions: Infinity });
+      }
+    };
+    el.addEventListener("load", handleLoad);
+  }, []);
+
+  const cycleModelViewerAnimation = useCallback(() => {
+    if (modelViewerAnimations.length === 0) return;
+    const nextIndex = (activeAnimationIndex + 1) % modelViewerAnimations.length;
+    setActiveAnimationIndex(nextIndex);
+    const el = modelViewerElRef.current;
+    if (el) {
+      el.animationName = modelViewerAnimations[nextIndex];
+      el.play?.({ repetitions: Infinity });
+    }
+  }, [modelViewerAnimations, activeAnimationIndex]);
+
   // ---- Mode: pick which model to place ----
   if (mode === "pickModel") {
     return (
@@ -186,6 +230,7 @@ export function CameraARLauncher() {
           // @ts-expect-error -- model-viewer is a web component with no bundled React types
           <model-viewer
             key={selectedAsset.modelType}
+            ref={attachModelViewer}
             src={selectedAsset.source.url}
             alt={selectedAsset.description}
             ar
@@ -195,6 +240,23 @@ export function CameraARLauncher() {
             auto-rotate
             style={{ width: "100%", height: "100%", backgroundColor: "#171327" }}
           />
+        )}
+
+        {modelViewerAnimations.length > 0 && (
+          <div className="pointer-events-none absolute inset-x-0 top-6 z-10 flex justify-center">
+            <span className="rounded-full bg-black/50 px-4 py-2 text-xs text-white backdrop-blur">
+              🎬 {modelViewerAnimations[activeAnimationIndex]}
+            </span>
+          </div>
+        )}
+
+        {modelViewerAnimations.length > 0 && (
+          <button
+            onClick={cycleModelViewerAnimation}
+            className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2 rounded-full bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-soft-lg"
+          >
+            👆 Make it react
+          </button>
         )}
 
         <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-1 bg-gradient-to-t from-black/80 to-transparent p-6 pb-10 text-center text-white">

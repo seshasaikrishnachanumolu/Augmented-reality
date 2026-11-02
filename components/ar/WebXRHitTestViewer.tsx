@@ -43,8 +43,14 @@ export function WebXRHitTestViewer({
   const [state, setState] = useState<SessionState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hasPlaced, setHasPlaced] = useState(false);
+  const [hasAnimations, setHasAnimations] = useState(false);
+  const [activeClipName, setActiveClipName] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<XRSession | null>(null);
+  // Set once the model's animation mixer is ready, inside the imperative
+  // Three.js setup below — the "Interact" button calls through this
+  // rather than needing its own copy of the animation state.
+  const cycleAnimationRef = useRef<() => void>(() => {});
   const remotePersonActiveRef = useRef(remotePersonActive);
   useEffect(() => {
     remotePersonActiveRef.current = remotePersonActive;
@@ -69,6 +75,8 @@ export function WebXRHitTestViewer({
   const startSession = useCallback(async () => {
     setState("starting");
     setErrorMessage(null);
+    setHasAnimations(false);
+    setActiveClipName(null);
 
     const xr = (navigator as Navigator & { xr?: XRSystem }).xr;
     if (!xr) {
@@ -117,6 +125,30 @@ export function WebXRHitTestViewer({
       let placedModel: THREE.Object3D | null = null;
       const loader = new GLTFLoader();
 
+      // Animation playback for whichever baked clips the loaded model has
+      // (if any) — tapping the "interact" button cycles through them, so
+      // e.g. the Robot waves, dances, jumps, etc. one at a time.
+      let mixer: THREE.AnimationMixer | null = null;
+      let clips: THREE.AnimationClip[] = [];
+      let currentClipIndex = 0;
+      let currentAction: THREE.AnimationAction | null = null;
+      let lastTimestamp: number | null = null;
+
+      const playClipAt = (index: number) => {
+        if (!mixer || clips.length === 0) return;
+        currentAction?.fadeOut(0.25);
+        currentClipIndex = index;
+        const action = mixer.clipAction(clips[currentClipIndex]);
+        action.reset().fadeIn(0.25).play();
+        currentAction = action;
+        setActiveClipName(clips[currentClipIndex].name);
+      };
+
+      cycleAnimationRef.current = () => {
+        if (clips.length === 0) return;
+        playClipAt((currentClipIndex + 1) % clips.length);
+      };
+
       const placeModelAt = (matrix: THREE.Matrix4) => {
         if (!placedModel) return;
         matrix.decompose(placedModel.position, placedModel.quaternion, placedModel.scale);
@@ -131,6 +163,13 @@ export function WebXRHitTestViewer({
           placedModel = gltf.scene;
           placedModel.visible = false;
           scene.add(placedModel);
+
+          if (gltf.animations.length > 0) {
+            mixer = new THREE.AnimationMixer(placedModel);
+            clips = gltf.animations;
+            setHasAnimations(true);
+            playClipAt(0);
+          }
         },
         undefined,
         () => setErrorMessage("Couldn't load the 3D model for placement.")
@@ -152,6 +191,9 @@ export function WebXRHitTestViewer({
         sessionRef.current = null;
         setState("idle");
         setHasPlaced(false);
+        setHasAnimations(false);
+        setActiveClipName(null);
+        cycleAnimationRef.current = () => {};
       });
 
       // A tap/select in AR either places the model on the current reticle
@@ -162,10 +204,14 @@ export function WebXRHitTestViewer({
         }
       });
 
-      renderer.setAnimationLoop((_timestamp, frame) => {
+      renderer.setAnimationLoop((timestamp, frame) => {
         if (!frame) return;
         const referenceSpace = renderer.xr.getReferenceSpace();
         if (!referenceSpace) return;
+
+        const delta = lastTimestamp !== null ? (timestamp - lastTimestamp) / 1000 : 0;
+        lastTimestamp = timestamp;
+        mixer?.update(delta);
 
         if (!hitTestSourceRequested) {
           hitTestSourceRequested = true;
@@ -291,6 +337,14 @@ export function WebXRHitTestViewer({
         </div>
       )}
 
+      {state === "active" && hasPlaced && hasAnimations && activeClipName && (
+        <div className="pointer-events-none absolute inset-x-0 top-10 flex justify-center">
+          <span className="rounded-full bg-black/50 px-4 py-2 text-xs text-white backdrop-blur">
+            🎬 {activeClipName}
+          </span>
+        </div>
+      )}
+
       {state === "active" && (
         <button
           onClick={handleExit}
@@ -298,6 +352,15 @@ export function WebXRHitTestViewer({
           aria-label="Exit AR"
         >
           ✕
+        </button>
+      )}
+
+      {state === "active" && hasPlaced && hasAnimations && (
+        <button
+          onClick={() => cycleAnimationRef.current()}
+          className="absolute bottom-10 left-1/2 -translate-x-1/2 rounded-full bg-brand-500 px-6 py-3 text-sm font-semibold text-white shadow-soft-lg"
+        >
+          👆 Make it react
         </button>
       )}
 
