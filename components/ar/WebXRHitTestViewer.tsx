@@ -59,6 +59,19 @@ export function WebXRHitTestViewer({
   // failure here is a slow/flaky mobile connection timing out, not a real
   // session problem.
   const retryLoadRef = useRef<() => void>(() => {});
+  // Which failure the error screen's "Retry" button should recover from —
+  // retrying a failed model download just redoes that fetch (the session
+  // is still alive), but retrying a failed session needs a brand new
+  // startSession() call, triggered by a fresh tap (WebXR requires genuine,
+  // unspent user activation for every requestSession call — you can't
+  // just call it again programmatically after one attempt fails).
+  const [errorStage, setErrorStage] = useState<"session" | "model" | null>(null);
+  // Starts false: requesting the optional "depth-sensing" feature has
+  // been observed to destabilize session negotiation entirely on at
+  // least one real device, with no confirmed working case yet — so it's
+  // off by default and only reconsidered as an explicit, deliberate
+  // opt-in later, not attempted automatically.
+  const attemptDepthSensingRef = useRef(false);
   const remotePersonActiveRef = useRef(remotePersonActive);
   useEffect(() => {
     remotePersonActiveRef.current = remotePersonActive;
@@ -83,6 +96,7 @@ export function WebXRHitTestViewer({
   const startSession = useCallback(async () => {
     setState("starting");
     setErrorMessage(null);
+    setErrorStage(null);
     setHasAnimations(false);
     setActiveClipName(null);
     setDepthOcclusionActive(false);
@@ -209,6 +223,7 @@ export function WebXRHitTestViewer({
             setErrorMessage(
               "Couldn't load the 3D model. This usually means a slow or unstable connection — check your signal and try again."
             );
+            setErrorStage("model");
             setState("error");
           }
         );
@@ -240,27 +255,20 @@ export function WebXRHitTestViewer({
         return init as XRSessionInit;
       };
 
-      // Requesting "depth-sensing" is supposed to be safely ignorable when
-      // unsupported (it's in optionalFeatures, not requiredFeatures), but
-      // some real Android/Chrome builds have been observed to destabilize
-      // the entire session — failing reference-space negotiation outright
-      // — when depth-sensing is requested but not actually available on
-      // that device. Core AR placement must never be put at risk by the
-      // experimental occlusion feature, so this tries with depth-sensing
-      // first and falls back to the plain, known-working session on any
-      // failure at all.
-      let session: XRSession | undefined;
-      try {
-        session = await xr.requestSession("immersive-ar", buildSessionInit(true));
-        await renderer.xr.setSession(session);
-      } catch {
-        await session?.end().catch(() => {});
-        session = await xr.requestSession("immersive-ar", buildSessionInit(false));
-        await renderer.xr.setSession(session);
-      }
-      if (!session) {
-        throw new Error("Couldn't start the AR session.");
-      }
+      // Exactly one requestSession call per startSession() invocation —
+      // WebXR requires a fresh, unspent user-activation (a real tap) for
+      // each attempt, so retrying it a second time programmatically
+      // within the same call always fails with "requires user
+      // activation", regardless of why the first attempt failed. If this
+      // throws, the outer catch below marks it as a "session"-stage
+      // error, flips attemptDepthSensingRef off (in case that was the
+      // cause), and the error screen's Retry button calls startSession()
+      // fresh on the next real tap.
+      const session = await xr.requestSession(
+        "immersive-ar",
+        buildSessionInit(attemptDepthSensingRef.current)
+      );
+      await renderer.xr.setSession(session);
       sessionRef.current = session;
       setState("active");
 
@@ -399,6 +407,12 @@ export function WebXRHitTestViewer({
         renderer.render(scene, camera);
       });
     } catch (error) {
+      // If depth-sensing was attempted and something failed, don't try
+      // it again on the next tap — whatever broke (session negotiation,
+      // reference space, etc.) is more likely explained by that than by
+      // chance, given it's only ever been tested successfully without it.
+      attemptDepthSensingRef.current = false;
+      setErrorStage("session");
       setState("error");
       setErrorMessage(error instanceof Error ? error.message : "Couldn't start the AR session.");
     }
@@ -517,8 +531,17 @@ export function WebXRHitTestViewer({
           <div className="mt-2 flex gap-3">
             <button
               onClick={() => {
-                setState("active");
-                retryLoadRef.current();
+                if (errorStage === "model") {
+                  // The session itself is still alive — just redo the
+                  // model fetch, no need to restart the camera/AR flow.
+                  setState("active");
+                  retryLoadRef.current();
+                } else {
+                  // The session failed to start at all; nothing exists
+                  // to resume, so start over from a fresh tap (this
+                  // click), which WebXR requires for a new attempt.
+                  startSession();
+                }
               }}
               className="rounded-full bg-brand-500 px-5 py-2 text-sm font-medium text-white"
             >
