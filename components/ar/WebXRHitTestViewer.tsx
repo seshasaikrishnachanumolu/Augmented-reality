@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createRemotePersonMesh, updateRemotePersonMesh } from "@/lib/call/remotePersonMesh";
+import { setupDepthOcclusion, enableDepthOcclusion, updateDepthOcclusion } from "@/lib/ar/depthOcclusion";
 
 type SessionState = "idle" | "starting" | "active" | "unsupported" | "error";
 
@@ -45,6 +46,7 @@ export function WebXRHitTestViewer({
   const [hasPlaced, setHasPlaced] = useState(false);
   const [hasAnimations, setHasAnimations] = useState(false);
   const [activeClipName, setActiveClipName] = useState<string | null>(null);
+  const [depthOcclusionActive, setDepthOcclusionActive] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sessionRef = useRef<XRSession | null>(null);
   // Set once the model's animation mixer is ready, inside the imperative
@@ -77,6 +79,7 @@ export function WebXRHitTestViewer({
     setErrorMessage(null);
     setHasAnimations(false);
     setActiveClipName(null);
+    setDepthOcclusionActive(false);
 
     const xr = (navigator as Navigator & { xr?: XRSystem }).xr;
     if (!xr) {
@@ -164,6 +167,21 @@ export function WebXRHitTestViewer({
           placedModel.visible = false;
           scene.add(placedModel);
 
+          // Patch every material on the model so it can be occluded by
+          // real-world depth (a hand reaching in front of it, etc.) — a
+          // no-op everywhere except devices that actually grant
+          // gpu-optimized depth sensing; see the uDepthEnabled check
+          // inside enableDepthOcclusion's injected shader code.
+          placedModel.traverse((object) => {
+            const mesh = object as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const material of materials) {
+              enableDepthOcclusion(material);
+              occlusionMaterials.push(material);
+            }
+          });
+
           if (gltf.animations.length > 0) {
             mixer = new THREE.AnimationMixer(placedModel);
             clips = gltf.animations;
@@ -178,14 +196,32 @@ export function WebXRHitTestViewer({
       let hitTestSource: XRHitTestSource | null = null;
       let hitTestSourceRequested = false;
 
+      // "depth-sensing" is optional (most devices don't support it) — when
+      // it's granted with gpu-optimized usage, real objects like a hand
+      // can correctly occlude the placed model instead of it always
+      // rendering on top of the whole camera feed. See lib/ar/depthOcclusion.
       const session = await xr.requestSession("immersive-ar", {
         requiredFeatures: ["hit-test"],
-        optionalFeatures: ["dom-overlay"],
+        optionalFeatures: ["dom-overlay", "depth-sensing"],
+        depthSensing: {
+          usagePreference: ["gpu-optimized"],
+          dataFormatPreference: ["luminance-alpha"],
+        },
         domOverlay: canvas.parentElement ? { root: canvas.parentElement } : undefined,
-      });
+      } as XRSessionInit);
       sessionRef.current = session;
       await renderer.xr.setSession(session);
       setState("active");
+
+      // Set up once the session is active — depthUsage is only populated
+      // after the session negotiation completes, so this can't be
+      // attempted any earlier. Null on any device without depth support;
+      // every call site below treats that as "skip occlusion".
+      const gl = renderer.getContext();
+      const depthSetup =
+        gl instanceof WebGL2RenderingContext ? setupDepthOcclusion(session, gl) : null;
+      setDepthOcclusionActive(depthSetup !== null);
+      const occlusionMaterials: THREE.Material[] = [];
 
       session.addEventListener("end", () => {
         sessionRef.current = null;
@@ -193,6 +229,7 @@ export function WebXRHitTestViewer({
         setHasPlaced(false);
         setHasAnimations(false);
         setActiveClipName(null);
+        setDepthOcclusionActive(false);
         cycleAnimationRef.current = () => {};
       });
 
@@ -242,6 +279,26 @@ export function WebXRHitTestViewer({
         const delta = lastTimestamp !== null ? (timestamp - lastTimestamp) / 1000 : 0;
         lastTimestamp = timestamp;
         mixer?.update(delta);
+
+        if (depthSetup && occlusionMaterials.length > 0) {
+          const viewerPose = frame.getViewerPose(referenceSpace);
+          const view = viewerPose?.views[0];
+          let depthInfo: XRWebGLDepthInformation | null = null;
+          if (view) {
+            try {
+              depthInfo = depthSetup.binding.getDepthInformation(view) ?? null;
+            } catch {
+              depthInfo = null;
+            }
+          }
+          updateDepthOcclusion(
+            occlusionMaterials,
+            depthInfo,
+            depthSetup.depthTexture,
+            gl.drawingBufferWidth,
+            gl.drawingBufferHeight
+          );
+        }
 
         if (!hitTestSourceRequested) {
           hitTestSourceRequested = true;
@@ -364,6 +421,12 @@ export function WebXRHitTestViewer({
           <span className="rounded-full bg-black/50 px-4 py-2 text-xs text-white backdrop-blur">
             🎯 Move your phone to find a surface, then tap to place
           </span>
+        </div>
+      )}
+
+      {state === "active" && depthOcclusionActive && (
+        <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-1 rounded-full bg-teal-500/80 px-3 py-1.5 text-[11px] text-white backdrop-blur">
+          🫳 Real touch occlusion active
         </div>
       )}
 
