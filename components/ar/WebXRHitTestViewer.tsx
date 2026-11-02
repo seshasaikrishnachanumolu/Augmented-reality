@@ -196,9 +196,39 @@ export function WebXRHitTestViewer({
         cycleAnimationRef.current = () => {};
       });
 
-      // A tap/select in AR either places the model on the current reticle
-      // position, or re-places it if it's already been placed once.
-      session.addEventListener("select", () => {
+      // A tap/select in AR does one of two things, depending on where the
+      // tap ray actually hits:
+      //  - tapping directly on the already-placed model "pokes" it,
+      //    triggering its next animation — this is the main interaction,
+      //    deliberately tied to touching the creature itself rather than
+      //    a separate UI button, to actually feel like interacting with it.
+      //  - tapping anywhere else (on the detected surface reticle) places
+      //    or re-places the model there, as before.
+      session.addEventListener("select", (event) => {
+        const inputEvent = event as XRInputSourceEvent;
+        const referenceSpace = renderer.xr.getReferenceSpace();
+
+        if (placedModel && placedModel.visible && referenceSpace) {
+          const targetRayPose = inputEvent.frame.getPose(
+            inputEvent.inputSource.targetRaySpace,
+            referenceSpace
+          );
+          if (targetRayPose) {
+            const rayMatrix = new THREE.Matrix4().fromArray(targetRayPose.transform.matrix);
+            const origin = new THREE.Vector3();
+            const rayQuaternion = new THREE.Quaternion();
+            const rayScale = new THREE.Vector3();
+            rayMatrix.decompose(origin, rayQuaternion, rayScale);
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(rayQuaternion);
+            const raycaster = new THREE.Raycaster(origin, direction);
+            const hitsModel = raycaster.intersectObject(placedModel, true).length > 0;
+            if (hitsModel) {
+              cycleAnimationRef.current();
+              return;
+            }
+          }
+        }
+
         if (reticle.visible) {
           placeModelAt(reticle.matrix.clone());
         }
@@ -338,7 +368,10 @@ export function WebXRHitTestViewer({
       )}
 
       {state === "active" && hasPlaced && hasAnimations && activeClipName && (
-        <div className="pointer-events-none absolute inset-x-0 top-10 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-10 flex flex-col items-center gap-1.5">
+          <span className="rounded-full bg-black/50 px-4 py-2 text-xs text-white backdrop-blur">
+            👆 Tap the model to make it react
+          </span>
           <span className="rounded-full bg-black/50 px-4 py-2 text-xs text-white backdrop-blur">
             🎬 {activeClipName}
           </span>
