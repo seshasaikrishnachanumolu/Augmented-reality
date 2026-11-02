@@ -53,6 +53,12 @@ export function WebXRHitTestViewer({
   // Three.js setup below — the "Interact" button calls through this
   // rather than needing its own copy of the animation state.
   const cycleAnimationRef = useRef<() => void>(() => {});
+  // Lets the "Retry" button on the error screen re-attempt just the model
+  // download without tearing down and restarting the whole (expensive)
+  // camera-permission + WebXR session flow — useful since the most common
+  // failure here is a slow/flaky mobile connection timing out, not a real
+  // session problem.
+  const retryLoadRef = useRef<() => void>(() => {});
   const remotePersonActiveRef = useRef(remotePersonActive);
   useEffect(() => {
     remotePersonActiveRef.current = remotePersonActive;
@@ -127,6 +133,7 @@ export function WebXRHitTestViewer({
 
       let placedModel: THREE.Object3D | null = null;
       const loader = new GLTFLoader();
+      const occlusionMaterials: THREE.Material[] = [];
 
       // Animation playback for whichever baked clips the loaded model has
       // (if any) — tapping the "interact" button cycles through them, so
@@ -160,38 +167,55 @@ export function WebXRHitTestViewer({
         setHasPlaced(true);
       };
 
-      loader.load(
-        modelSrc,
-        (gltf) => {
-          placedModel = gltf.scene;
-          placedModel.visible = false;
-          scene.add(placedModel);
+      const loadModel = () => {
+        setErrorMessage(null);
+        loader.load(
+          modelSrc,
+          (gltf) => {
+            placedModel = gltf.scene;
+            placedModel.visible = false;
+            scene.add(placedModel);
 
-          // Patch every material on the model so it can be occluded by
-          // real-world depth (a hand reaching in front of it, etc.) — a
-          // no-op everywhere except devices that actually grant
-          // gpu-optimized depth sensing; see the uDepthEnabled check
-          // inside enableDepthOcclusion's injected shader code.
-          placedModel.traverse((object) => {
-            const mesh = object as THREE.Mesh;
-            if (!mesh.isMesh) return;
-            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            for (const material of materials) {
-              enableDepthOcclusion(material);
-              occlusionMaterials.push(material);
+            // Patch every material on the model so it can be occluded by
+            // real-world depth (a hand reaching in front of it, etc.) — a
+            // no-op everywhere except devices that actually grant
+            // gpu-optimized depth sensing; see the uDepthEnabled check
+            // inside enableDepthOcclusion's injected shader code.
+            placedModel.traverse((object) => {
+              const mesh = object as THREE.Mesh;
+              if (!mesh.isMesh) return;
+              const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+              for (const material of materials) {
+                enableDepthOcclusion(material);
+                occlusionMaterials.push(material);
+              }
+            });
+
+            if (gltf.animations.length > 0) {
+              mixer = new THREE.AnimationMixer(placedModel);
+              clips = gltf.animations;
+              setHasAnimations(true);
+              playClipAt(0);
             }
-          });
-
-          if (gltf.animations.length > 0) {
-            mixer = new THREE.AnimationMixer(placedModel);
-            clips = gltf.animations;
-            setHasAnimations(true);
-            playClipAt(0);
+          },
+          undefined,
+          (error) => {
+            // Surface the real underlying error (network failure, slow
+            // connection timing out, CORS, etc.) instead of a generic
+            // message, and log it for diagnosis — this previously only
+            // set an error message without actually switching the UI
+            // into the error state, so failures went silent.
+            console.error("Failed to load AR model:", modelSrc, error);
+            setErrorMessage(
+              "Couldn't load the 3D model. This usually means a slow or unstable connection — check your signal and try again."
+            );
+            setState("error");
           }
-        },
-        undefined,
-        () => setErrorMessage("Couldn't load the 3D model for placement.")
-      );
+        );
+      };
+
+      retryLoadRef.current = loadModel;
+      loadModel();
 
       let hitTestSource: XRHitTestSource | null = null;
       let hitTestSourceRequested = false;
@@ -248,7 +272,6 @@ export function WebXRHitTestViewer({
       const depthSetup =
         gl instanceof WebGL2RenderingContext ? setupDepthOcclusion(session, gl) : null;
       setDepthOcclusionActive(depthSetup !== null);
-      const occlusionMaterials: THREE.Material[] = [];
 
       session.addEventListener("end", () => {
         sessionRef.current = null;
@@ -491,9 +514,20 @@ export function WebXRHitTestViewer({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-900/95 p-6 text-center text-white">
           <span className="text-4xl">⚠️</span>
           <p className="max-w-xs text-sm text-white/70">{errorMessage ?? "Something went wrong starting AR."}</p>
-          <button onClick={onExit} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-surface-900">
-            Back
-          </button>
+          <div className="mt-2 flex gap-3">
+            <button
+              onClick={() => {
+                setState("active");
+                retryLoadRef.current();
+              }}
+              className="rounded-full bg-brand-500 px-5 py-2 text-sm font-medium text-white"
+            >
+              Retry
+            </button>
+            <button onClick={onExit} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-surface-900">
+              Back
+            </button>
+          </div>
         </div>
       )}
     </div>
