@@ -284,7 +284,32 @@ export function WebXRHitTestViewer({
       // new requestSession call collides with it ("There is already an
       // active, immersive XRSession").
       sessionRef.current = session;
-      await renderer.xr.setSession(session);
+
+      // three.js defaults to the "local" reference space, but at least
+      // one real device/browser in testing rejects that specific type
+      // outright ("This device does not support the requested reference
+      // space type") while still supporting the session itself. Try a
+      // few types in order of preference — the session stays valid
+      // between attempts since only the reference-space request itself
+      // fails, not the session — so this recovers instead of crashing.
+      const referenceSpaceTypesToTry: XRReferenceSpaceType[] = ["local-floor", "local", "viewer"];
+      let setSessionError: unknown = null;
+      let sessionReady = false;
+      for (const spaceType of referenceSpaceTypesToTry) {
+        try {
+          renderer.xr.setReferenceSpaceType(spaceType);
+          await renderer.xr.setSession(session);
+          sessionReady = true;
+          break;
+        } catch (err) {
+          setSessionError = err;
+        }
+      }
+      if (!sessionReady) {
+        throw setSessionError instanceof Error
+          ? setSessionError
+          : new Error("Couldn't start the AR session.");
+      }
       setState("active");
 
       // Set up once the session is active — depthUsage is only populated
