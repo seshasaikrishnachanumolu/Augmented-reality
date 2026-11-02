@@ -110,6 +110,15 @@ export function WebXRHitTestViewer({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Defensively close out any session left over from a previous
+    // attempt before starting a new one — belt-and-suspenders alongside
+    // the cleanup in the catch block below, since "There is already an
+    // active, immersive XRSession" is unrecoverable without this.
+    if (sessionRef.current) {
+      await sessionRef.current.end().catch(() => {});
+      sessionRef.current = null;
+    }
+
     try {
       const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -268,8 +277,14 @@ export function WebXRHitTestViewer({
         "immersive-ar",
         buildSessionInit(attemptDepthSensingRef.current)
       );
-      await renderer.xr.setSession(session);
+      // Tracked immediately, before anything else below gets a chance to
+      // throw — otherwise a failure in renderer.xr.setSession (or
+      // anything after it) would leave this real, successfully-created
+      // session dangling with nothing tracking it, so a later Retry's
+      // new requestSession call collides with it ("There is already an
+      // active, immersive XRSession").
       sessionRef.current = session;
+      await renderer.xr.setSession(session);
       setState("active");
 
       // Set up once the session is active — depthUsage is only populated
@@ -407,6 +422,13 @@ export function WebXRHitTestViewer({
         renderer.render(scene, camera);
       });
     } catch (error) {
+      // Whatever failed, close any session that did get created before
+      // the failure (e.g. requestSession succeeded but setSession or a
+      // later step threw) — otherwise it's left dangling and the next
+      // Retry's requestSession call collides with it ("There is already
+      // an active, immersive XRSession").
+      await sessionRef.current?.end().catch(() => {});
+      sessionRef.current = null;
       // If depth-sensing was attempted and something failed, don't try
       // it again on the next tap — whatever broke (session negotiation,
       // reference space, etc.) is more likely explained by that than by
